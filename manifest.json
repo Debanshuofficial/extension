@@ -3,9 +3,6 @@
   "name": "My Gemini Assistant",
   "version": "2.0",
   "description": "Context-aware AI assistant that stays with you.",
-  "background": {
-    "service_worker": "background.js"
-  },
   "content_scripts": [
     {
       "matches": [
@@ -13,9 +10,6 @@
       ],
       "js": [
         "content.js"
-      ],
-      "css": [
-        "styles.css"
       ]
     }
   ],
