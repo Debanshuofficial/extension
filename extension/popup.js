@@ -86,24 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       let pageContext = "";
       if (tabs && tabs.length > 0) {
-        const tab = tabs[0];
-        pageContext = `Current Page Title: "${tab.title}"\nCurrent Page URL: "${tab.url}"`;
-        
-        // Attempt to scrape page content
-        try {
-            const results = await chrome.scripting.executeScript({
-                target: { tabId: tab.id },
-                func: () => document.body.innerText
-            });
-            if (results && results[0]) {
-                const visibleText = (results[0].result || "").replace(/\s+/g, ' ').substring(0, 8000);
-                pageContext += `\n\n=== PAGE VISIBLE CONTENT ===\n${visibleText}\n============================`;
-            }
-        } catch (err) {
-            console.warn("Could not read page content:", err);
-            pageContext += `\n(Could not read page content: ${err.message})`;
-        }
-
+        pageContext = `Current Page Title: "${tabs[0].title}"\nCurrent Page URL: "${tabs[0].url}"`;
       } else {
         pageContext = "Could not detect page context.";
       }
@@ -112,12 +95,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const prompt = `User Goal: "${userQuery}".
         ${pageContext}
         
-        Based on the User Goal and the provided Page Content, provide a specific step-by-step guide.
-        Use the Page Content to identify specific button names, link titles, or form labels.
-        Verify if the User Goal is achievable on this page.
-        
+        Based on the User Goal and the Current Page, provide a specific step-by-step guide.
+        if the goal is general, give general steps. If it relates to the current page, give specific UI interactions.
         RETURN ONLY A RAW JSON ARRAY of strings. No markdown, no "json" tags.
-        Example: ["Step 1: Click the 'Log In' button", "Step 2: Type your email"]`;
+        Example: ["Step 1: Click X", "Step 2: Type Y"]`;
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 

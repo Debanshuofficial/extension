@@ -13,9 +13,7 @@
       ]
     }
   ],
-  "action": {
-    "default_popup": "popup.html"
-  },
+  "action": {},
   "permissions": [
     "activeTab",
     "scripting",
