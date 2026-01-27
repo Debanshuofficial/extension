@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "My Gemini Assistant",
+  "version": "2.0",
+  "description": "Context-aware AI assistant that stays with you.",
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://generativelanguage.googleapis.com/*"
+  ]
+}
