@@ -114,6 +114,21 @@ if (document.getElementById('gemini-ext-root')) {
     .gemini-content-text {
         white-space: pre-wrap;
     }
+    
+    .gemini-action-btn {
+        display: inline-block;
+        margin-top: 10px;
+        padding: 6px 12px;
+        background: #28a745;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: transform 0.1s;
+    }
+    .gemini-action-btn:active { transform: scale(0.95); }
+
 
     /* Row 3: Search Bar */
     .gemini-input-row {
@@ -126,14 +141,19 @@ if (document.getElementById('gemini-ext-root')) {
 
     .gemini-input {
         flex-grow: 1;
-        background: transparent;
-        border: none;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.2);
+        border-radius: 8px;
         color: white;
         font-size: 14px;
         outline: none;
-        padding: 8px;
+        padding: 8px 12px;
     }
-    .gemini-input::placeholder { color: #555; }
+    .gemini-input::placeholder { color: #888; }
+    .gemini-input:focus {
+        background: rgba(255,255,255,0.15);
+        border-color: rgba(102,126,234,0.5);
+    }
 
     .gemini-send-btn {
         background: #667eea;
@@ -188,6 +208,18 @@ if (document.getElementById('gemini-ext-root')) {
     /* Scrollbar */
     .gemini-body::-webkit-scrollbar { width: 6px; }
     .gemini-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+    /* Highlighter Box */
+    .gemini-highlight-box {
+        position: absolute;
+        border: 3px solid #667eea;
+        background: rgba(102, 126, 234, 0.2);
+        border-radius: 4px;
+        pointer-events: none;
+        z-index: 2147483646; /* Just below the extension UI */
+        transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+        box-shadow: 0 0 15px rgba(102, 126, 234, 0.5);
+    }
     `;
     document.head.appendChild(style);
 
@@ -226,7 +258,8 @@ if (document.getElementById('gemini-ext-root')) {
 
         <!-- Row 3: Input Row -->
         <div class="gemini-input-row">
-            <input type="text" id="gemini-query-input" class="gemini-input" placeholder="What do you want to do?">
+            <input type="text" id="gemini-query-input" class="gemini-input" placeholder="Type or speak...">
+            <button id="gemini-mic-btn" class="gemini-send-btn" style="background:none; border: 1px solid rgba(255,255,255,0.2);">🎤</button>
             <button id="gemini-send-btn" class="gemini-send-btn">➤</button>
         </div>
 
@@ -275,7 +308,9 @@ if (document.getElementById('gemini-ext-root')) {
 
         // Buttons
         btnSend: document.getElementById('gemini-send-btn'),
+        btnMic: document.getElementById('gemini-mic-btn'),
         btnKey: document.getElementById('btn-key'),
+
         btnPrev: document.getElementById('btn-prev'),
         btnReload: document.getElementById('btn-reload'),
         btnNext: document.getElementById('btn-next'),
@@ -309,14 +344,33 @@ if (document.getElementById('gemini-ext-root')) {
             els.emptyState.classList.add('hidden');
             els.contentWrapper.classList.remove('hidden');
 
-            els.stepCounter.innerText = `STEP ${state.currentStepIndex + 1} / ${state.currentPlan.length}`;
-            els.instructionText.innerText = state.currentPlan[state.currentStepIndex];
+            const step = state.currentPlan[state.currentStepIndex];
+            const text = typeof step === 'string' ? step : step.instruction;
+            const targetId = typeof step === 'object' ? step.targetElementId : null;
 
-            // Auto-scroll body to top when step changes
+            els.stepCounter.innerText = `STEP ${state.currentStepIndex + 1} / ${state.currentPlan.length}`;
+            els.instructionText.innerHTML = `
+                ${text}
+                <br>
+                ${targetId ? `<button class="gemini-action-btn" data-target="${targetId}">⚡ Do It</button>` : ''}
+            `;
+
+            // Wire up the new dynamic button
+            const actionBtn = els.instructionText.querySelector('.gemini-action-btn');
+            if (actionBtn) {
+                actionBtn.addEventListener('click', () => {
+                    performAction(targetId);
+                });
+            }
+
+            // Trigger Highlight
+            highlightElement(targetId);
+
             els.body.scrollTop = 0;
         } else {
             els.emptyState.classList.remove('hidden');
             els.contentWrapper.classList.add('hidden');
+            highlightElement(null);
         }
 
         // 4. Button States
@@ -328,42 +382,135 @@ if (document.getElementById('gemini-ext-root')) {
         els.btnTrash.style.opacity = (hasPlan) ? '1' : '0.3';
     };
 
-    const fetchGeminiPlan = async (query, forceContextUpdate = false) => {
+    // --- Page Context Extraction ---
+    const getSimplifiedDOM = () => {
+        const interactiveSelectors = 'a, button, input, textarea, select, [role="button"], [onclick]';
+        const elements = document.querySelectorAll(interactiveSelectors);
+        const simplified = [];
+
+        // Add a "map" of elements to reference later
+        // usage: elements[index]
+
+        elements.forEach((el, index) => {
+            if (el.offsetParent === null) return; // Skip hidden elements
+
+            // Generate a simple identifier
+            let label = el.innerText || el.placeholder || el.ariaLabel || el.name || el.id || '';
+            label = label.slice(0, 50).replace(/\s+/g, ' ').trim();
+
+            if (!label && el.tagName === 'INPUT') label = 'Input Field';
+            if (!label) return; // Skip unlabeled junk
+
+            // Create a unique selector-like path if possible, or just use index
+            // For LLM usage, providing a "gemini-id" attribute temporarily might be cleaner,
+            // but for now let's just describe it and expect an approximate selector back.
+            // Actually, let's assign a temp ID to make it robust.
+            const tempId = `gemini-ref-${index}`;
+            el.dataset.geminiId = tempId;
+
+            simplified.push({
+                id: tempId,
+                tag: el.tagName.toLowerCase(),
+                text: label,
+                type: el.type || ''
+            });
+        });
+
+        return simplified.slice(0, 500); // Limit to 500 interactive elements to save tokens
+    };
+
+    const highlightElement = (selectorOrId) => {
+        // Remove existing highlight
+        const existing = document.getElementById('gemini-highlight-temp');
+        if (existing) existing.remove();
+
+        if (!selectorOrId) return;
+
+        let target = null;
+        if (selectorOrId.startsWith('gemini-ref-')) {
+            target = document.querySelector(`[data-gemini-id="${selectorOrId}"]`);
+        } else {
+            try {
+                target = document.querySelector(selectorOrId);
+            } catch (e) { }
+        }
+
+        if (target) {
+            const rect = target.getBoundingClientRect();
+            const highlight = document.createElement('div');
+            highlight.id = 'gemini-highlight-temp';
+            highlight.className = 'gemini-highlight-box';
+            highlight.style.left = `${rect.left + window.scrollX}px`;
+            highlight.style.top = `${rect.top + window.scrollY}px`;
+            highlight.style.width = `${rect.width}px`;
+            highlight.style.height = `${rect.height}px`;
+
+            document.body.appendChild(highlight);
+
+            // Smooth scroll to it
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    };
+
+    const fetchGeminiPlan = async (query) => {
         if (!state.apiKey) {
             els.apiOverlay.classList.remove('hidden');
             return;
         }
 
-        // UI Loading State
         els.emptyState.classList.add('hidden');
         els.contentWrapper.classList.remove('hidden');
+        els.stepCounter.innerText = "READING PAGE...";
+        els.instructionText.innerText = "Scanning for buttons and links...";
+
+        // 1. Get Page Context
+        const domSnapshot = getSimplifiedDOM();
+
         els.stepCounter.innerText = "THINKING...";
-        els.instructionText.innerText = "Analyzing page structure...";
+        els.instructionText.innerText = "Designing navigation actions...";
 
-        const pageContext = `Current Page Title: "${document.title}"\nURL: "${window.location.href}"`;
-
-        // Construct Prompt
+        // 2. Construct Prompt
         const prompt = `
+        You are a web navigation assistant.
         User Goal: "${query}"
-        Context: ${pageContext}
         
-        Task: Provide a clear, step-by-step guide to achieve the User Goal on this specific page.
-        Format: Return ONLY a raw JSON array of strings. Example: ["Click on 'Login'", "Enter credentials"]
+        I have scanned the page and found these interactive elements (JSON format):
+        ${JSON.stringify(domSnapshot)}
+        
+        Current Title: "${document.title}"
+        Current URL: "${window.location.href}"
+
+        Task: Provide a JSON array of steps to achieve the goal.
+        Each step object must have:
+        - "instruction": A short text description for the user.
+        - "targetElementId": The 'id' from the interactive elements list that matches the action. If general instruction, use null.
+        
+        Example Response:
+        [
+            { "instruction": "Click on the Search Box", "targetElementId": "gemini-ref-4" },
+            { "instruction": "Type 'Running Shoes'", "targetElementId": "gemini-ref-4" },
+            { "instruction": "Click the magnifying glass icon", "targetElementId": "gemini-ref-12" }
+        ]
+
+        Return ONLY raw JSON. No markdown formatting.
         `;
 
         try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${state.apiKey}`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${state.apiKey}`;
             const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
             });
 
-            if (!response.ok) throw new Error("API Error");
-            const data = await response.json();
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const apiMessage = data?.error?.message || response.statusText || 'Unknown API error';
+                throw new Error(`API Error (${response.status}): ${apiMessage}`);
+            }
             let text = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
-            if (!text) throw new Error("No response");
+            if (!text) throw new Error("No response from AI");
 
             // Parse JSON
             text = text.replace(/```json|```/g, '').trim();
@@ -371,10 +518,12 @@ if (document.getElementById('gemini-ext-root')) {
             try {
                 plan = JSON.parse(text);
             } catch (e) {
-                plan = text.split('\n').filter(line => line.trim().length > 0);
+                console.error("JSON Parse Error", e);
+                // Fallback for plain text response
+                plan = [{ instruction: text, targetElementId: null }];
             }
 
-            if (!Array.isArray(plan)) plan = [text];
+            if (!Array.isArray(plan)) plan = [plan];
 
             // Update State
             state.currentPlan = plan;
@@ -386,6 +535,7 @@ if (document.getElementById('gemini-ext-root')) {
         } catch (err) {
             els.instructionText.innerText = `Error: ${err.message}`;
             els.stepCounter.innerText = "ERROR";
+            console.error(err);
         }
     };
 
@@ -440,6 +590,73 @@ if (document.getElementById('gemini-ext-root')) {
     els.queryInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') handleSearch();
     });
+
+    // Voice Input
+    if ('webkitSpeechRecognition' in window) {
+        const recognition = new webkitSpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+
+        recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            els.queryInput.value = transcript;
+            setTimeout(handleSearch, 500); // Auto-send
+        };
+
+        recognition.onerror = (e) => {
+            console.error("Speech error", e);
+            alert("Mic error: " + e.error);
+        };
+
+        els.btnMic.addEventListener('click', () => {
+            els.btnMic.style.color = '#ff4444';
+            recognition.start();
+        });
+
+        recognition.onend = () => {
+            els.btnMic.style.color = '';
+        };
+    } else {
+        els.btnMic.style.display = 'none';
+        console.warn("Speech API not supported");
+    }
+
+    // Auto-Execution
+    const performAction = (targetId) => {
+        const target = document.querySelector(`[data-gemini-id="${targetId}"]`);
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // Highlight verifies it's the right one
+            highlightElement(targetId);
+
+            setTimeout(() => {
+                target.focus();
+                target.click();
+
+                // Visual feedback
+                const anim = document.createElement('div');
+                anim.style.position = 'absolute';
+                const rect = target.getBoundingClientRect();
+                anim.style.left = (rect.left + rect.width / 2 + window.scrollX) + 'px';
+                anim.style.top = (rect.top + rect.height / 2 + window.scrollY) + 'px';
+                anim.style.transform = 'translate(-50%, -50%)';
+                anim.textContent = '⚡';
+                anim.style.fontSize = '30px';
+                anim.style.zIndex = 99999999;
+                anim.style.pointerEvents = 'none';
+                document.body.appendChild(anim);
+
+                anim.animate([
+                    { transform: 'translate(-50%, -50%) scale(1)', opacity: 1 },
+                    { transform: 'translate(-50%, -50%) scale(2)', opacity: 0 }
+                ], { duration: 500 }).onfinish = () => anim.remove();
+
+            }, 300);
+        } else {
+            alert("Element not found (might be hidden or dynamic)");
+        }
+    };
 
     // Navigation Buttons
     els.btnPrev.addEventListener('click', () => {
