@@ -471,28 +471,30 @@ if (document.getElementById('gemini-ext-root')) {
 
         // 2. Construct Prompt
         const prompt = `
-        You are a web navigation assistant.
+        You are a comprehensive web assistant.
         User Goal: "${query}"
-        
-        I have scanned the page and found these interactive elements (JSON format):
-        ${JSON.stringify(domSnapshot)}
-        
-        Current Title: "${document.title}"
-        Current URL: "${window.location.href}"
 
-        Task: Provide a JSON array of steps to achieve the goal.
-        Each step object must have:
-        - "instruction": A short text description for the user.
-        - "targetElementId": The 'id' from the interactive elements list that matches the action. If general instruction, use null.
+        Current Tab Context:
+        - Title: "${document.title}"
+        - URL: "${window.location.href}"
+        - Interactive Elements (JSON): ${JSON.stringify(domSnapshot)}
+
+        Task: Provide a COMPLETE, step-by-step plan to achieve the user's goal. 
+        - If the goal requires multiple pages or actions outside this tab, list ALL steps for the entire process.
+        - If a step can be performed on the CURRENT page using one of the provided interactive elements, provide its "targetElementId".
+        - If a step is general (e.g., "Go to website.com", "Wait for email") or not on this page, set "targetElementId" to null.
         
-        Example Response:
+        Format: JSON Array of objects.
+        [{ "instruction": "Step description", "targetElementId": "id_or_null" }]
+
+        Example:
         [
-            { "instruction": "Click on the Search Box", "targetElementId": "gemini-ref-4" },
-            { "instruction": "Type 'Running Shoes'", "targetElementId": "gemini-ref-4" },
-            { "instruction": "Click the magnifying glass icon", "targetElementId": "gemini-ref-12" }
+            { "instruction": "Go to 'example.com'", "targetElementId": null },
+            { "instruction": "Click 'Login'", "targetElementId": "gemini-ref-12" }, 
+            { "instruction": "After logging in, check your dashboard.", "targetElementId": null }
         ]
 
-        Return ONLY raw JSON. No markdown formatting.
+        Return ONLY raw JSON. No markdown.
         `;
 
         try {
