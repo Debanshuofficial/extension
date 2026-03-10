@@ -1,5 +1,5 @@
 if (document.getElementById('gemini-ext-root')) {
-
+// github re-connected
 } else {
     // --- CSS Styles ---
     const style = document.createElement('style');
